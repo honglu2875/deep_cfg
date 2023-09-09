@@ -7,12 +7,12 @@ import torch.nn.functional as F
 
 _device = "cuda"
 #_model_name = "gpt2"
-_model_name = "EleutherAI/pythia-1b"
+_model_name = "EleutherAI/pythia-12b"
 prompt = "A man brings a gun to a local high school,"
 neg = "In a school shooting event, a man brings a gun to a local high school,"
 
 tokenizer = AutoTokenizer.from_pretrained(_model_name)
-model = Model.from_pretrained(_model_name, device_map=_device)
+model = Model.from_pretrained(_model_name, device_map=_device, torch_dtype=torch.float16)
 
 inner = model.gpt_neox
 layers = model.gpt_neox.layers
@@ -30,26 +30,33 @@ def generate(tokenizer, model, inner, prompt, negative_prompt, **kwargs):
     past_kv = None
     neg_past_kv = None
     hidden_state_patch = None
+
     def func(x, y):
         if verbose:
             print("Called!")
         return x + (1 - cfg) * y
-    for i in range(max_length):
-        tok = negative_tok if i == 0 else generated_tok[-1:]
-        neg_output = inner(input_ids=torch.tensor([tok], dtype=torch.int64, device=_device), past_key_values=neg_past_kv, use_cache=True, stop_at=apply_to_layer)
-        if verbose:
-            print(neg_output[0].shape)
-            #print(neg_output[1])
+        #return cfg * x
 
-        hidden_state_patch = {
-            "layer": apply_to_layer,
-            "func": func,
-            "delta": neg_output[0][:, - 1 - i :],
-        }
-        neg_past_kv = neg_output[1]
+    for i in range(max_length):
+        if not torch.isclose(cfg, torch.tensor(1.0)):
+            tok = negative_tok if i == 0 else generated_tok[-1:]
+            neg_output = inner(input_ids=torch.tensor([tok], dtype=torch.int64, device=_device), past_key_values=neg_past_kv, use_cache=True, stop_at=apply_to_layer)
+            if verbose:
+                print(neg_output[0].shape)
+                #print(neg_output[1])
+
+            hidden_state_patch = {
+                "layer": apply_to_layer,
+                "func": func,
+                "delta": neg_output[0][:, - 1 - i :],
+            }
+            neg_past_kv = neg_output[1]
 
         tok = prompt_tok if i == 0 else generated_tok[-1:]
-        output = model(input_ids=torch.tensor([tok], dtype=torch.int64, device=_device), past_key_values=past_kv, use_cache=True, hidden_state_patch=hidden_state_patch)
+        if not torch.isclose(cfg, torch.tensor(1.0)):
+            output = model(input_ids=torch.tensor([tok], dtype=torch.int64, device=_device), past_key_values=past_kv, use_cache=True, hidden_state_patch=hidden_state_patch)
+        else:
+            output = model(input_ids=torch.tensor([tok], dtype=torch.int64, device=_device), past_key_values=past_kv, use_cache=True)
         
         if len(output.logits.shape) < 3:
             logits = output.logits[-1] * 1./temp  # no batching
@@ -72,7 +79,12 @@ print()
 hline = "=" * 25
 
 with torch.inference_mode():
-    _gamma = 1
+    _gamma = 1.5
+    print("Baseline completions (no CFG, 3 times):")
+    for _ in range(3):
+        res = generate(tokenizer, model, inner, prompt, neg, apply_to_layer=0, temp=1.0, cfg=1.0, verbose=False)
+        print(hline + "\n" + prompt + res + f"\n{hline}\n")
+
     for _layer in range(0, len(layers)):
-        res = generate(tokenizer, model, inner, prompt, neg, apply_to_layer=_layer, cfg=_gamma, verbose=False)
-        print(f"CFG strength = {_gamma}, layer = {_layer}:\n{hline}\n" + prompt + res + f"\n{hline}\n")
+        res = generate(tokenizer, model, inner, prompt, neg, apply_to_layer=_layer, temp=1.0, cfg=_gamma, verbose=False)
+        print(f"- CFG strength = {_gamma}, layer = {_layer}:\n{hline}\n" + prompt + res + f"\n{hline}\n")
