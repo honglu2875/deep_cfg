@@ -1,21 +1,29 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
 #from gpt2 import GPT2LMHeadModel as Model
-from neox import GPTNeoXForCausalLM as Model
+#from neox import GPTNeoXForCausalLM as Model
+from llama import LlamaForCausalLM as Model
 import torch
 import torch.nn.functional as F
 
 
 _device = "cuda"
 #_model_name = "gpt2"
-_model_name = "EleutherAI/pythia-12b"
-prompt = "A man brings a gun to a local high school,"
-neg = "In a school shooting event, a man brings a gun to a local high school,"
+_model_name = "WizardLM/WizardLM-13B-V1.2"
+#prompt = "A man brings a gun to a local high school,"
+#neg = "In a school shooting event, a man brings a gun to a local high school,"
+#prompt = "USER: if a man brings a gun to a local high school, what does he want to do?\nASSISTANT:"
+#neg = "USER: if a man wants to have a very bad thing happening, what does he want to do?\nASSISTANT:"
+#prompt = "USER: I am flipping a coin. Give me a guess of whether it is the head or the tail.\nASSISTANT:"
+#neg = "USER: I am flipping a coin but I have a superpower to make sure the head is always facing up. Give me a guess of whether it is the head or the tail.\nASSISTANT:"
+prompt = "USER: Choose one: apple or pear?\nASSISTANT:"
+#neg = "USER: Repeat after me, \"apple\".\nASSISTANT:"
+neg = "USER: As an AI, do you have a personal preference and can you eat or taste?\nASSISTANT:"
 
 tokenizer = AutoTokenizer.from_pretrained(_model_name)
 model = Model.from_pretrained(_model_name, device_map=_device, torch_dtype=torch.float16)
 
-inner = model.gpt_neox
-layers = model.gpt_neox.layers
+inner = model.model
+layers = model.model.layers
 
 def isclose(a, b, atol=1e-3):
     return abs(a - b) < atol
@@ -83,12 +91,12 @@ print()
 hline = "=" * 25
 
 with torch.inference_mode():
-    _gamma = 1.2
-    print("Baseline completions (no CFG, 3 times):")
-    for _ in range(3):
-        res = generate(tokenizer, model, inner, prompt, neg, apply_to_layer=0, temp=1.0, cfg=1.0, verbose=False)
+    _gamma = 1.5
+    print("Baseline completions (no CFG, 10 times):")
+    for _ in range(10):
+        res = generate(tokenizer, model, inner, prompt, neg, apply_to_layer=0, temp=1.0, cfg=1.0, max_length=20, verbose=False)
         print(hline + "\n" + prompt + res + f"\n{hline}\n")
 
     for _layer in range(0, len(layers)):
-        res = generate(tokenizer, model, inner, prompt, neg, apply_to_layer=_layer, temp=1.0, cfg=_gamma, verbose=False)
+        res = generate(tokenizer, model, inner, prompt, neg, apply_to_layer=_layer, temp=1.0, cfg=_gamma, max_length=20, verbose=False)
         print(f"- CFG strength = {_gamma}, layer = {_layer}:\n{hline}\n" + prompt + res + f"\n{hline}\n")
