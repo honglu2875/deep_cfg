@@ -17,6 +17,10 @@ model = Model.from_pretrained(_model_name, device_map=_device, torch_dtype=torch
 inner = model.gpt_neox
 layers = model.gpt_neox.layers
 
+def isclose(a, b, atol=1e-3):
+    return abs(a - b) < atol
+
+
 def generate(tokenizer, model, inner, prompt, negative_prompt, **kwargs):
     prompt_tok = tokenizer(prompt)["input_ids"]
     negative_tok = tokenizer(negative_prompt)["input_ids"]
@@ -38,7 +42,7 @@ def generate(tokenizer, model, inner, prompt, negative_prompt, **kwargs):
         #return cfg * x
 
     for i in range(max_length):
-        if not torch.isclose(cfg, torch.tensor(1.0)):
+        if not isclose(cfg, 1.0):
             tok = negative_tok if i == 0 else generated_tok[-1:]
             neg_output = inner(input_ids=torch.tensor([tok], dtype=torch.int64, device=_device), past_key_values=neg_past_kv, use_cache=True, stop_at=apply_to_layer)
             if verbose:
@@ -53,7 +57,7 @@ def generate(tokenizer, model, inner, prompt, negative_prompt, **kwargs):
             neg_past_kv = neg_output[1]
 
         tok = prompt_tok if i == 0 else generated_tok[-1:]
-        if not torch.isclose(cfg, torch.tensor(1.0)):
+        if not isclose(cfg, 1.0):
             output = model(input_ids=torch.tensor([tok], dtype=torch.int64, device=_device), past_key_values=past_kv, use_cache=True, hidden_state_patch=hidden_state_patch)
         else:
             output = model(input_ids=torch.tensor([tok], dtype=torch.int64, device=_device), past_key_values=past_kv, use_cache=True)
